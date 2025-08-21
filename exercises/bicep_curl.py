@@ -5,6 +5,7 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import time
+import os
 
 # --- Helper Functions ---
 def calculate_angle(a, b, c):
@@ -43,6 +44,7 @@ def run():
             'good_reps': 0, 'feedback_list': []
         })
 
+    # ---------------- READY SCREEN ----------------
     if not st.session_state.workout_started:
         if not st.session_state.get('start_countdown', False):
             st.subheader("Get Ready!")
@@ -60,7 +62,10 @@ def run():
         else:
             countdown_placeholder = st.empty()
             for i in range(3, 0, -1):
-                countdown_placeholder.markdown(f"<h1 style='text-align:center;font-size:4em'>{i}</h1>", unsafe_allow_html=True)
+                countdown_placeholder.markdown(
+                    f"<h1 style='text-align:center;font-size:4em'>{i}</h1>",
+                    unsafe_allow_html=True
+                )
                 time.sleep(1)
             countdown_placeholder.markdown("<h1 style='text-align:center;font-size:4em'>GO!</h1>", unsafe_allow_html=True)
             time.sleep(1)
@@ -70,6 +75,7 @@ def run():
             del st.session_state['start_countdown']
             st.rerun()
 
+    # ---------------- WORKOUT SCREEN ----------------
     else:
         if st.button("⏹ End Workout"):
             st.session_state.workout_duration = time.time() - st.session_state.start_time
@@ -77,56 +83,105 @@ def run():
             st.session_state.workout_started = False
             st.rerun()
 
-        # Display Metrics at Top
+        # Display Metrics
         col1, col2, col3 = st.columns(3)
         col1.metric("Reps", st.session_state.counter)
         col2.metric("Stage", st.session_state.stage if st.session_state.stage else "-")
         col3.metric("Good Reps", st.session_state.good_reps)
 
-        # Larger Camera Feed (centered, ~80% width)
+        # Centered Camera Feed
         col_center = st.columns([1,5,1])[1]
         FRAME_WINDOW = col_center.image([], channels="BGR", use_container_width=True)
 
         mp_drawing, mp_pose = mp.solutions.drawing_utils, mp.solutions.pose
-        cap = cv2.VideoCapture(0)
 
-        with mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5) as pose:
-            while cap.isOpened() and st.session_state.workout_started:
-                ret, frame = cap.read()
-                if not ret:
-                    st.error("❌ Could not access webcam.")
-                    break
+        # Check runtime: Local vs Cloud
+        runtime = st.secrets.get("runtime", "local")
 
-                image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                results = pose.process(image)
-                image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        if runtime == "cloud":
+            # Streamlit Cloud Camera
+            img_file_buffer = st.camera_input("📷 Show me your workout")
+            if img_file_buffer:
+                bytes_data = img_file_buffer.getvalue()
+                frame = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
 
-                try:
-                    landmarks = results.pose_landmarks.landmark
-                    shoulder = [landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].x,
-                                landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].y]
-                    elbow = [landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].x,
-                             landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].y]
-                    wrist = [landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].x,
-                             landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].y]
+                with mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5) as pose:
+                    image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    results = pose.process(image)
+                    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
 
-                    elbow_angle = calculate_angle(shoulder, elbow, wrist)
+                    try:
+                        landmarks = results.pose_landmarks.landmark
+                        shoulder = [landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].x,
+                                    landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].y]
+                        elbow = [landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].x,
+                                 landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].y]
+                        wrist = [landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].x,
+                                 landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].y]
 
-                    if elbow_angle > 160:
-                        st.session_state.stage = "down"
-                    if elbow_angle < 30 and st.session_state.stage == 'down':
-                        st.session_state.stage = "up"
-                        st.session_state.counter += 1
-                        if not st.session_state.feedback_list:
-                            st.session_state.good_reps += 1
+                        elbow_angle = calculate_angle(shoulder, elbow, wrist)
 
-                    st.session_state.feedback_list = check_bicep_curl_form(landmarks, elbow_angle, st.session_state.stage)
-                except:
-                    pass
+                        if elbow_angle > 160:
+                            st.session_state.stage = "down"
+                        if elbow_angle < 30 and st.session_state.stage == 'down':
+                            st.session_state.stage = "up"
+                            st.session_state.counter += 1
+                            if not st.session_state.feedback_list:
+                                st.session_state.good_reps += 1
 
-                if results.pose_landmarks:
-                    mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
+                        st.session_state.feedback_list = check_bicep_curl_form(
+                            landmarks, elbow_angle, st.session_state.stage
+                        )
+                    except:
+                        pass
 
-                FRAME_WINDOW.image(image, channels='BGR', use_container_width=True)
+                    if results.pose_landmarks:
+                        mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
 
-        cap.release()
+                    FRAME_WINDOW.image(image, channels='BGR', use_container_width=True)
+
+        else:
+            # Local Webcam (cv2)
+            cap = cv2.VideoCapture(0)
+            with mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5) as pose:
+                while cap.isOpened() and st.session_state.workout_started:
+                    ret, frame = cap.read()
+                    if not ret:
+                        st.error("❌ Could not access webcam.")
+                        break
+
+                    image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    results = pose.process(image)
+                    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+
+                    try:
+                        landmarks = results.pose_landmarks.landmark
+                        shoulder = [landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].x,
+                                    landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].y]
+                        elbow = [landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].x,
+                                 landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].y]
+                        wrist = [landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].x,
+                                 landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].y]
+
+                        elbow_angle = calculate_angle(shoulder, elbow, wrist)
+
+                        if elbow_angle > 160:
+                            st.session_state.stage = "down"
+                        if elbow_angle < 30 and st.session_state.stage == 'down':
+                            st.session_state.stage = "up"
+                            st.session_state.counter += 1
+                            if not st.session_state.feedback_list:
+                                st.session_state.good_reps += 1
+
+                        st.session_state.feedback_list = check_bicep_curl_form(
+                            landmarks, elbow_angle, st.session_state.stage
+                        )
+                    except:
+                        pass
+
+                    if results.pose_landmarks:
+                        mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
+
+                    FRAME_WINDOW.image(image, channels='BGR', use_container_width=True)
+
+            cap.release()

@@ -1,10 +1,10 @@
 # exercises/bicep_curl.py
 
-import streamlit as st
 import cv2
 import mediapipe as mp
 import numpy as np
-import time
+import streamlit as st
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 
 # --- Helper Functions ---
 def calculate_angle(a, b, c):
@@ -29,86 +29,74 @@ def check_bicep_curl_form(landmarks, elbow_angle, stage):
         feedback.append("Avoid swinging your body.")
     if (elbow.x - shoulder.x) > 0.08:
         feedback.append("Keep elbows tucked in.")
-
     return feedback
 
-# --- Main Workout Function ---
+
+# --- Video Processor for Live Webcam ---
+class BicepCurlProcessor(VideoTransformerBase):
+    def __init__(self):
+        self.counter = 0
+        self.stage = None
+        self.good_reps = 0
+        self.feedback_list = []
+
+        self.mp_pose = mp.solutions.pose
+        self.pose = self.mp_pose.Pose()
+        self.mp_drawing = mp.solutions.drawing_utils
+
+    def transform(self, frame):
+        img = frame.to_ndarray(format="bgr24")
+        results = self.pose.process(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+
+        try:
+            landmarks = results.pose_landmarks.landmark
+            shoulder = [landmarks[self.mp_pose.PoseLandmark.LEFT_SHOULDER.value].x,
+                        landmarks[self.mp_pose.PoseLandmark.LEFT_SHOULDER.value].y]
+            elbow = [landmarks[self.mp_pose.PoseLandmark.LEFT_ELBOW.value].x,
+                     landmarks[self.mp_pose.PoseLandmark.LEFT_ELBOW.value].y]
+            wrist = [landmarks[self.mp_pose.PoseLandmark.LEFT_WRIST.value].x,
+                     landmarks[self.mp_pose.PoseLandmark.LEFT_WRIST.value].y]
+
+            elbow_angle = calculate_angle(shoulder, elbow, wrist)
+
+            # Rep counting logic
+            if elbow_angle > 160:
+                self.stage = "down"
+            if elbow_angle < 30 and self.stage == "down":
+                self.stage = "up"
+                self.counter += 1
+                if not self.feedback_list:
+                    self.good_reps += 1
+
+            # Check form
+            self.feedback_list = check_bicep_curl_form(landmarks, elbow_angle, self.stage)
+
+        except:
+            pass
+
+        # Draw pose
+        if results.pose_landmarks:
+            self.mp_drawing.draw_landmarks(img, results.pose_landmarks, self.mp_pose.POSE_CONNECTIONS)
+
+        # Display metrics
+        cv2.putText(img, f"Reps: {self.counter}", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        cv2.putText(img, f"Stage: {self.stage if self.stage else '-'}", (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        cv2.putText(img, f"Good Reps: {self.good_reps}", (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+        if self.feedback_list:
+            y = 160
+            for fb in self.feedback_list:
+                cv2.putText(img, fb, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                y += 30
+        return img
+
+
+# --- Main Run Function ---
 def run():
-    st.title("💪 Bicep Curl Tracker")
+    st.title("💪 Live Bicep Curl Tracker")
 
-    if 'workout_started' not in st.session_state:
-        st.session_state.update({
-            'workout_started': False, 'counter': 0,
-            'stage': None, 'start_time': 0,
-            'good_reps': 0, 'feedback_list': []
-        })
-
-    if not st.session_state.workout_started:
-        col1, col2 = st.columns(2)
-        if col1.button("▶ Start Workout"):
-            st.session_state.workout_started = True
-            st.session_state.start_time = time.time()
-            st.rerun()
-        if col2.button("🏠 Back to Home"):
-            st.session_state.page = 'home'
-            for key in list(st.session_state.keys()):
-                if key != 'page': del st.session_state[key]
-            st.rerun()
-
-    else:
-        if st.button("⏹ End Workout"):
-            st.session_state.workout_duration = time.time() - st.session_state.start_time
-            st.session_state.page = 'summary'
-            st.session_state.workout_started = False
-            st.rerun()
-
-        # Display Metrics
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Reps", st.session_state.counter)
-        col2.metric("Stage", st.session_state.stage if st.session_state.stage else "-")
-        col3.metric("Good Reps", st.session_state.good_reps)
-
-        mp_drawing, mp_pose = mp.solutions.drawing_utils, mp.solutions.pose
-
-        # Cloud-Friendly Camera Input
-        img_file_buffer = st.camera_input("📷 Show me your workout")
-
-        if img_file_buffer:
-            # Decode uploaded frame
-            bytes_data = img_file_buffer.getvalue()
-            frame = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
-
-            with mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5) as pose:
-                image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                results = pose.process(image)
-                image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-
-                try:
-                    landmarks = results.pose_landmarks.landmark
-                    shoulder = [landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].x,
-                                landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].y]
-                    elbow = [landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].x,
-                             landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].y]
-                    wrist = [landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].x,
-                             landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].y]
-
-                    elbow_angle = calculate_angle(shoulder, elbow, wrist)
-
-                    if elbow_angle > 160:
-                        st.session_state.stage = "down"
-                    if elbow_angle < 30 and st.session_state.stage == 'down':
-                        st.session_state.stage = "up"
-                        st.session_state.counter += 1
-                        if not st.session_state.feedback_list:
-                            st.session_state.good_reps += 1
-
-                    st.session_state.feedback_list = check_bicep_curl_form(
-                        landmarks, elbow_angle, st.session_state.stage
-                    )
-                except:
-                    pass
-
-                if results.pose_landmarks:
-                    mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
-
-                st.image(image, channels='BGR', use_container_width=True)
+    webrtc_streamer(
+        key="bicep",
+        video_processor_factory=BicepCurlProcessor,
+        media_stream_constraints={"video": True, "audio": False},
+    )

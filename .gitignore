@@ -10,9 +10,6 @@ venv/
 ENV/
 env/
 
-# Streamlit
-.streamlit/
-
 # Logs
 *.log
 

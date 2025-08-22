@@ -24,12 +24,16 @@ def run():
     st.set_page_config(layout="wide")
     st.title("🏋️ Squat Tracker")
 
-    if 'workout_started' not in st.session_state or st.session_state.get('current_exercise') != 'squats':
-        st.session_state.workout_started = False
+    # If the workout is not currently running, reset the state for this exercise.
+    # This is a more robust way to initialize and prevents the error.
+    if not st.session_state.get('workout_started', False):
         st.session_state.current_exercise = 'squats'
-        st.session_state.counter, st.session_state.stage = 0, None
-        st.session_state.start_time, st.session_state.good_reps = 0, 0
+        st.session_state.counter = 0
+        st.session_state.stage = None
+        st.session_state.start_time = 0
+        st.session_state.good_reps = 0
         st.session_state.feedback_list = []
+        st.session_state.start_countdown = False
 
     if not st.session_state.workout_started:
         if not st.session_state.get('start_countdown', False):

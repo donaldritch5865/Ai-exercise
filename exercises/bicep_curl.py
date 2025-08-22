@@ -1,152 +1,132 @@
 # exercises/bicep_curl.py
 
-import time
-import cv2
-import numpy as np
 import streamlit as st
+import cv2
 import mediapipe as mp
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration, VideoTransformerBase
+import numpy as np
+import time
 
-# --- helpers ---
+# --- Helper Functions ---
 def calculate_angle(a, b, c):
     a, b, c = np.array(a), np.array(b), np.array(c)
     radians = np.arctan2(c[1]-b[1], c[0]-b[0]) - np.arctan2(a[1]-b[1], a[0]-b[0])
-    angle = np.abs(radians * 180.0 / np.pi)
-    return 360 - angle if angle > 180 else angle
+    angle = np.abs(radians*180.0/np.pi)
+    return 360-angle if angle > 180 else angle
 
 def check_bicep_curl_form(landmarks, elbow_angle, stage):
     feedback = []
     mp_pose = mp.solutions.pose
+
     shoulder = landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value]
-    elbow    = landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value]
-    hip      = landmarks[mp_pose.PoseLandmark.LEFT_HIP.value]
+    elbow = landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value]
+    hip = landmarks[mp_pose.PoseLandmark.LEFT_HIP.value]
 
     if stage == "up" and elbow_angle > 45:
-        feedback.append("Lift higher for a full contraction.")
+        feedback.append("Lift higher for a full contraction!")
     if stage == "down" and elbow_angle < 150:
-        feedback.append("Lower your arm completely.")
+        feedback.append("Lower your arm completely!")
     if abs(shoulder.x - hip.x) > 0.08:
         feedback.append("Avoid swinging your body.")
     if (elbow.x - shoulder.x) > 0.08:
         feedback.append("Keep elbows tucked in.")
+
     return feedback
 
-
-# --- live processor (no UI text here; keep overlays minimal) ---
-class BicepCurlProcessor(VideoTransformerBase):
-    def __init__(self):
-        self.counter = 0
-        self.stage = None
-        self.good_reps = 0
-        self.elbow_angle = 0
-        self.feedback_list = []
-
-        self.mp_pose = mp.solutions.pose
-        # Use default CPU pose; more stable on Streamlit Cloud
-        self.pose = self.mp_pose.Pose(
-            model_complexity=1,
-            enable_segmentation=False,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5,
-        )
-        self.drawer = mp.solutions.drawing_utils
-
-    def transform(self, frame):
-        img = frame.to_ndarray(format="bgr24")
-        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        results = self.pose.process(rgb)
-
-        try:
-            lms = results.pose_landmarks.landmark
-
-            shoulder = [lms[self.mp_pose.PoseLandmark.LEFT_SHOULDER.value].x,
-                        lms[self.mp_pose.PoseLandmark.LEFT_SHOULDER.value].y]
-            elbow    = [lms[self.mp_pose.PoseLandmark.LEFT_ELBOW.value].x,
-                        lms[self.mp_pose.PoseLandmark.LEFT_ELBOW.value].y]
-            wrist    = [lms[self.mp_pose.PoseLandmark.LEFT_WRIST.value].x,
-                        lms[self.mp_pose.PoseLandmark.LEFT_WRIST.value].y]
-
-            self.elbow_angle = calculate_angle(shoulder, elbow, wrist)
-
-            # Rep counting (same logic as before)
-            if self.elbow_angle > 160:
-                self.stage = "down"
-            if self.elbow_angle < 30 and self.stage == "down":
-                self.stage = "up"
-                self.counter += 1
-                if not self.feedback_list:
-                    self.good_reps += 1
-
-            # Form feedback (for the UI panel)
-            self.feedback_list = check_bicep_curl_form(lms, self.elbow_angle, self.stage)
-
-        except Exception:
-            pass
-
-        # Draw only landmarks/lines (no text on video)
-        if results.pose_landmarks:
-            self.drawer.draw_landmarks(img, results.pose_landmarks, self.mp_pose.POSE_CONNECTIONS)
-
-        return img
-
-
-RTC_CONFIG = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
-
-# --- main ---
+# --- Main Workout Function ---
 def run():
-    st.title("💪 Live Bicep Curl Tracker")
+    st.title("💪 Bicep Curl Tracker")
 
-    # Top metrics – updated live in a loop below
-    m1, m2, m3 = st.columns(3)
-    reps_ph   = m1.empty()
-    stage_ph  = m2.empty()
-    good_ph   = m3.empty()
+    if 'workout_started' not in st.session_state:
+        st.session_state.update({
+            'workout_started': False, 'countdown_finished': False,
+            'counter': 0, 'stage': None, 'start_time': 0,
+            'good_reps': 0, 'feedback_list': []
+        })
 
-    # Centered video
-    center = st.columns([1, 4, 1])[1]
-    with center:
-        webrtc_ctx = webrtc_streamer(
-            key="bicep",
-            mode=WebRtcMode.SENDRECV,
-            rtc_configuration=RTC_CONFIG,
-            media_stream_constraints={"video": True, "audio": False},
-            video_processor_factory=BicepCurlProcessor,
-        )
+    if not st.session_state.workout_started:
+        if not st.session_state.get('start_countdown', False):
+            st.subheader("Get Ready!")
+            st.write("Stand straight, ensure your upper body is clearly visible in the camera.")
 
-    # Analysis panel (separate from video)
-    st.markdown("---")
-    a1, a2 = st.columns([2, 1])
+            col1, col2 = st.columns(2)
+            if col1.button("▶ Start Workout"):
+                st.session_state.start_countdown = True
+                st.rerun()
+            if col2.button("🏠 Back to Home"):
+                st.session_state.page = 'home'
+                for key in list(st.session_state.keys()):
+                    if key != 'page': del st.session_state[key]
+                st.rerun()
+        else:
+            countdown_placeholder = st.empty()
+            for i in range(3, 0, -1):
+                countdown_placeholder.markdown(f"<h1 style='text-align:center;font-size:4em'>{i}</h1>", unsafe_allow_html=True)
+                time.sleep(1)
+            countdown_placeholder.markdown("<h1 style='text-align:center;font-size:4em'>GO!</h1>", unsafe_allow_html=True)
+            time.sleep(1)
 
-    with a1:
-        st.subheader("Form Feedback (Live)")
-        feedback_box = st.empty()
+            st.session_state.workout_started = True
+            st.session_state.start_time = time.time()
+            del st.session_state['start_countdown']
+            st.rerun()
 
-    with a2:
-        st.subheader("Elbow Angle")
-        angle_ph = st.empty()
+    else:
+        if st.button("⏹ End Workout"):
+            st.session_state.workout_duration = time.time() - st.session_state.start_time
+            st.session_state.page = 'summary'
+            st.session_state.workout_started = False
+            st.rerun()
 
-    # Live UI updater
-    if webrtc_ctx and webrtc_ctx.state.playing:
-        while webrtc_ctx.state.playing:
-            vp = webrtc_ctx.video_processor
-            if vp is None:
-                break
+        # Display Metrics at Top
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Reps", st.session_state.counter)
+        col2.metric("Stage", st.session_state.stage if st.session_state.stage else "-")
+        col3.metric("Good Reps", st.session_state.good_reps)
 
-            reps_ph.metric("Reps", int(vp.counter))
-            stage_ph.metric("Stage", vp.stage if vp.stage else "-")
-            good_ph.metric("Good Reps", int(vp.good_reps))
+        # Larger Camera Feed (centered, ~80% width)
+        col_center = st.columns([1,5,1])[1]
+        FRAME_WINDOW = col_center.image([], channels="BGR", use_container_width=True)
 
-            # Angle + feedback text
-            angle_ph.markdown(f"<h3 style='text-align:center'>{int(vp.elbow_angle)}°</h3>", unsafe_allow_html=True)
-            if vp.feedback_list:
-                feedback_box.write("\n".join([f"• {t}" for t in vp.feedback_list]))
-            else:
-                feedback_box.success("Good form!")
+        mp_drawing, mp_pose = mp.solutions.drawing_utils, mp.solutions.pose
+        cap = cv2.VideoCapture(0)
 
-            time.sleep(0.1)
+        with mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5) as pose:
+            while cap.isOpened() and st.session_state.workout_started:
+                ret, frame = cap.read()
+                if not ret:
+                    st.error("❌ Could not access webcam.")
+                    break
 
-    # Optional: End Workout button to match your app flow
-    st.markdown("---")
-    if st.button("⏹ End Workout"):
-        st.session_state.page = "summary"
-        st.rerun()
+                image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                results = pose.process(image)
+                image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+
+                try:
+                    landmarks = results.pose_landmarks.landmark
+                    shoulder = [landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].x,
+                                landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].y]
+                    elbow = [landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].x,
+                             landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].y]
+                    wrist = [landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].x,
+                             landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].y]
+
+                    elbow_angle = calculate_angle(shoulder, elbow, wrist)
+
+                    if elbow_angle > 160:
+                        st.session_state.stage = "down"
+                    if elbow_angle < 30 and st.session_state.stage == 'down':
+                        st.session_state.stage = "up"
+                        st.session_state.counter += 1
+                        if not st.session_state.feedback_list:
+                            st.session_state.good_reps += 1
+
+                    st.session_state.feedback_list = check_bicep_curl_form(landmarks, elbow_angle, st.session_state.stage)
+                except:
+                    pass
+
+                if results.pose_landmarks:
+                    mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
+
+                FRAME_WINDOW.image(image, channels='BGR', use_container_width=True)
+
+        cap.release()

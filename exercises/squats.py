@@ -109,5 +109,5 @@ def run():
                     cv2.putText(img, "GOOD FORM", (15,y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0), 2)
 
                 if res.pose_landmarks: mp_drawing.draw_landmarks(img, res.pose_landmarks, mp_pose.POSE_CONNECTIONS)
-                FRAME_WINDOW.image(img, channels="BGR", use_column_width=True)
+                FRAME_WINDOW.image(img, channels="BGR", use_container_width=True)
         cap.release()

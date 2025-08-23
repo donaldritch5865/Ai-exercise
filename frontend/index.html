@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Fitness Trainer</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>AI Fitness Trainer 💪</h1>
+            <p class="subtitle">Track · Improve · Transform</p>
+        </header>
+
+        <!-- Exercise Selection Screen -->
+        <div id="exercise-selection" class="screen active">
+            <div class="exercises-grid" id="exercises-grid">
+                <!-- Exercises will be loaded dynamically -->
+            </div>
+        </div>
+
+        <!-- Workout Screen -->
+        <div id="workout-screen" class="screen">
+            <div class="workout-header">
+                <h2 id="current-exercise-title">Exercise</h2>
+                <button id="stop-workout-btn" class="btn btn-danger">⏹ Stop Workout</button>
+            </div>
+
+            <div class="workout-content">
+                <div class="video-container">
+                    <img id="video-feed" src="" alt="Video Feed" />
+                    <div class="video-overlay">
+                        <div id="countdown" class="countdown hidden"></div>
+                    </div>
+                </div>
+
+                <div class="stats-panel">
+                    <div class="stat-card">
+                        <div class="stat-value" id="reps-count">0</div>
+                        <div class="stat-label">Reps</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="good-reps-count">0</div>
+                        <div class="stat-label">Good Reps</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stage-display">-</div>
+                        <div class="stat-label">Stage</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="time-elapsed">0s</div>
+                        <div class="stat-label">Time</div>
+                    </div>
+                </div>
+
+                <div class="feedback-panel">
+                    <h3>Form Feedback</h3>
+                    <div id="feedback-list" class="feedback-list">
+                        <div class="feedback-item good">Ready to start!</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Summary Screen -->
+        <div id="summary-screen" class="screen">
+            <div class="summary-content">
+                <h2>Workout Complete! 🎉</h2>
+                <div class="summary-stats" id="summary-stats">
+                    <!-- Summary stats will be populated here -->
+                </div>
+                <button id="back-to-home-btn" class="btn btn-primary">Back to Home</button>
+            </div>
+        </div>
+
+        <!-- Loading Screen -->
+        <div id="loading-screen" class="screen">
+            <div class="loading-content">
+                <div class="spinner"></div>
+                <p>Starting workout...</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

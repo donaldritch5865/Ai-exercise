@@ -23,15 +23,18 @@ def check_pushup_form(elbow_angle, hip_angle, stage):
     return feedback
 
 def run():
-    st.set_page_config(layout="wide")
     st.title("🤸 Push-Up Tracker")
 
+    # Initialize state robustly
     if 'workout_started' not in st.session_state or st.session_state.get('current_exercise') != 'pushups':
         st.session_state.workout_started = False
         st.session_state.current_exercise = 'pushups'
-        st.session_state.counter, st.session_state.stage = 0, "up"
-        st.session_state.start_time, st.session_state.good_reps = 0, 0
+        st.session_state.counter = 0
+        st.session_state.stage = "up"
+        st.session_state.start_time = 0
+        st.session_state.good_reps = 0
         st.session_state.feedback_list = []
+        st.session_state.start_countdown = False
 
     if not st.session_state.workout_started:
         if not st.session_state.get('start_countdown', False):
@@ -60,20 +63,24 @@ def run():
             st.rerun()
 
     else:
-        c1, c2, c3 = st.columns([1,2,1])
-        with c1:
-            if st.button("⏹ End Workout"):
-                st.session_state.workout_duration = time.time() - st.session_state.start_time
-                st.session_state.page, st.session_state.workout_started = 'summary', False
-                st.rerun()
+        if st.button("⏹ End Workout"):
+            st.session_state.workout_duration = time.time() - st.session_state.start_time
+            st.session_state.page, st.session_state.workout_started = 'summary', False
+            st.rerun()
 
-        m1, m2 = st.columns(2)
-        m1.metric("Reps", st.session_state.counter)
-        m2.metric("Good Reps", st.session_state.good_reps)
+        # Show metrics
+        col1, col2, col3 = st.columns(3)
+        reps_metric = col1.empty()
+        stage_metric = col2.empty()
+        good_reps_metric = col3.empty()
 
         FRAME_WINDOW = st.image([])
         mp_drawing, mp_pose = mp.solutions.drawing_utils, mp.solutions.pose
         cap = cv2.VideoCapture(0)
+
+        if not cap.isOpened():
+            st.error("❌ Webcam not available.")
+            st.stop()
 
         with mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5) as pose:
             while cap.isOpened() and st.session_state.workout_started:
@@ -94,23 +101,45 @@ def run():
                     elbow_angle = calculate_angle(shoulder, elbow, wrist)
                     hip_angle = calculate_angle(shoulder, hip, knee)
 
-                    if elbow_angle > 160: st.session_state.stage = "up"
-                    if elbow_angle < 90 and st.session_state.stage == "up":
-                        st.session_state.stage = "down"
-                        st.session_state.counter += 1
-                        if not st.session_state.feedback_list:
-                            st.session_state.good_reps += 1
+                    # --- Corrected Rep Counting and Feedback Logic ---
+                    
+                    # Determine current stage based on elbow angle
+                    if elbow_angle > 160:
+                        current_stage = "up"
+                    elif elbow_angle < 90:
+                        current_stage = "down"
+                    else:
+                        current_stage = st.session_state.stage
 
-                    st.session_state.feedback_list = check_pushup_form(elbow_angle, hip_angle, st.session_state.stage)
+                    # Check for the specific transition from "up" to "down" to count a rep
+                    if current_stage == "down" and st.session_state.stage == "up":
+                        st.session_state.counter += 1
+                        # Check form at the exact moment the rep is completed
+                        if not check_pushup_form(elbow_angle, hip_angle, "down"):
+                            st.session_state.good_reps += 1
+                    
+                    # Update the stage for the next frame
+                    st.session_state.stage = current_stage
+                    
+                    # Get feedback for the current frame to display
+                    st.session_state.feedback_list = check_pushup_form(elbow_angle, hip_angle, current_stage)
+
                 except: pass
 
+                # On-Screen Feedback
                 y = 100
                 if st.session_state.feedback_list:
                     for fb in st.session_state.feedback_list:
-                        cv2.putText(img, fb, (15,y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2); y+=30
+                        cv2.putText(img, fb, (15,y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2, cv2.LINE_AA); y+=30
                 else:
-                    cv2.putText(img, "GOOD FORM", (15,y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0), 2)
+                    cv2.putText(img, "GOOD FORM", (15,y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0), 2, cv2.LINE_AA)
 
-                if res.pose_landmarks: mp_drawing.draw_landmarks(img, res.pose_landmarks, mp_pose.POSE_CONNECTIONS)
+                if res.pose_landmarks: 
+                    mp_drawing.draw_landmarks(img, res.pose_landmarks, mp_pose.POSE_CONNECTIONS)
+                
+                # Update UI
+                reps_metric.metric("Reps", st.session_state.counter)
+                stage_metric.metric("Stage", st.session_state.stage if st.session_state.stage else "-")
+                good_reps_metric.metric("Good Reps", st.session_state.good_reps)
                 FRAME_WINDOW.image(img, channels="BGR", use_container_width=True)
         cap.release()

@@ -21,31 +21,33 @@ def check_squat_form(knee_angle, hip_angle, stage):
     return feedback
 
 def run():
-    st.set_page_config(layout="wide")
     st.title("🏋️ Squat Tracker")
 
+    # Initialize state
     if 'workout_started' not in st.session_state or st.session_state.get('current_exercise') != 'squats':
         st.session_state.workout_started = False
         st.session_state.current_exercise = 'squats'
-        st.session_state.counter, st.session_state.stage = 0, None
-        st.session_state.start_time, st.session_state.good_reps = 0, 0
+        st.session_state.counter = 0
+        st.session_state.stage = "up"
+        st.session_state.start_time = 0
+        st.session_state.good_reps = 0
         st.session_state.feedback_list = []
+        st.session_state.start_countdown = False
 
     if not st.session_state.workout_started:
         if not st.session_state.get('start_countdown', False):
-            st.header("Get Ready!")
+            st.subheader("Get Ready!")
             st.write("Make sure your full body is visible in the camera.")
+
             col1, col2 = st.columns(2)
-            with col1:
-                if st.button("Start Squats"):
-                    st.session_state.start_countdown = True
-                    st.rerun()
-            with col2:
-                if st.button("Back to Home"):
-                    st.session_state.page = 'home'
-                    for k in list(st.session_state.keys()):
-                        if k != 'page': del st.session_state[k]
-                    st.rerun()
+            if col1.button("▶ Start Workout"):
+                st.session_state.start_countdown = True
+                st.rerun()
+            if col2.button("🏠 Back to Home"):
+                st.session_state.page = 'home'
+                for k in list(st.session_state.keys()):
+                    if k != 'page': del st.session_state[k]
+                st.rerun()
         else:
             cd = st.empty()
             for i in range(3,0,-1):
@@ -58,20 +60,24 @@ def run():
             st.rerun()
 
     else:
-        c1, c2, c3 = st.columns([1,2,1])
-        with c1:
-            if st.button("⏹ End Workout"):
-                st.session_state.workout_duration = time.time() - st.session_state.start_time
-                st.session_state.page, st.session_state.workout_started = 'summary', False
-                st.rerun()
+        if st.button("⏹ End Workout"):
+            st.session_state.workout_duration = time.time() - st.session_state.start_time
+            st.session_state.page, st.session_state.workout_started = 'summary', False
+            st.rerun()
 
-        m1, m2 = st.columns(2)
-        m1.metric("Reps", st.session_state.counter)
-        m2.metric("Good Reps", st.session_state.good_reps)
+        # Metrics placeholders (same as bicep_curl.py)
+        col1, col2, col3 = st.columns(3)
+        reps_metric = col1.empty()
+        stage_metric = col2.empty()
+        good_reps_metric = col3.empty()
 
         FRAME_WINDOW = st.image([])
         mp_drawing, mp_pose = mp.solutions.drawing_utils, mp.solutions.pose
         cap = cv2.VideoCapture(0)
+
+        if not cap.isOpened():
+            st.error("❌ Webcam not available.")
+            st.stop()
 
         with mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5) as pose:
             while cap.isOpened() and st.session_state.workout_started:
@@ -91,23 +97,34 @@ def run():
                     knee_angle = calculate_angle(hip, knee, ankle)
                     hip_angle = calculate_angle(shoulder, hip, knee)
 
-                    if knee_angle > 160: st.session_state.stage = "up"
+                    if knee_angle > 160: 
+                        st.session_state.stage = "up"
                     if knee_angle < 100 and st.session_state.stage == "up":
                         st.session_state.stage = "down"
                         st.session_state.counter += 1
-                        if not st.session_state.feedback_list:
+                        # Good rep check
+                        if not check_squat_form(knee_angle, hip_angle, "down"):
                             st.session_state.good_reps += 1
-
+                    
                     st.session_state.feedback_list = check_squat_form(knee_angle, hip_angle, st.session_state.stage)
+
                 except: pass
 
+                # Feedback
                 y = 100
                 if st.session_state.feedback_list:
                     for fb in st.session_state.feedback_list:
-                        cv2.putText(img, fb, (15,y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2); y+=30
+                        cv2.putText(img, fb, (15,y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2, cv2.LINE_AA); y+=30
                 else:
-                    cv2.putText(img, "GOOD FORM", (15,y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0), 2)
+                    cv2.putText(img, "GOOD FORM", (15,y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0), 2, cv2.LINE_AA)
 
-                if res.pose_landmarks: mp_drawing.draw_landmarks(img, res.pose_landmarks, mp_pose.POSE_CONNECTIONS)
+                if res.pose_landmarks: 
+                    mp_drawing.draw_landmarks(img, res.pose_landmarks, mp_pose.POSE_CONNECTIONS)
+                
+                # Update metrics live (fixed)
+                reps_metric.metric("Reps", st.session_state.counter)
+                stage_metric.metric("Stage", st.session_state.stage if st.session_state.stage else "-")
+                good_reps_metric.metric("Good Reps", st.session_state.good_reps)
                 FRAME_WINDOW.image(img, channels="BGR", use_container_width=True)
+
         cap.release()

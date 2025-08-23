@@ -36,12 +36,16 @@ def check_bicep_curl_form(landmarks, elbow_angle, stage):
 def run():
     st.title("💪 Bicep Curl Tracker")
 
-    if 'workout_started' not in st.session_state:
-        st.session_state.update({
-            'workout_started': False, 'countdown_finished': False,
-            'counter': 0, 'stage': None, 'start_time': 0,
-            'good_reps': 0, 'feedback_list': []
-        })
+    # Initialize state robustly, resetting if exercise changes
+    if 'workout_started' not in st.session_state or st.session_state.get('current_exercise') != 'bicep_curl':
+        st.session_state.workout_started = False
+        st.session_state.current_exercise = 'bicep_curl'
+        st.session_state.counter = 0
+        st.session_state.stage = 'down' # Start in the down position
+        st.session_state.start_time = 0
+        st.session_state.good_reps = 0
+        st.session_state.feedback_list = []
+        st.session_state.start_countdown = False
 
     if not st.session_state.workout_started:
         if not st.session_state.get('start_countdown', False):
@@ -77,24 +81,26 @@ def run():
             st.session_state.workout_started = False
             st.rerun()
 
-        # Display Metrics at Top
+        # --- Re-introducing the clean metric display ---
         col1, col2, col3 = st.columns(3)
-        col1.metric("Reps", st.session_state.counter)
-        col2.metric("Stage", st.session_state.stage if st.session_state.stage else "-")
-        col3.metric("Good Reps", st.session_state.good_reps)
+        reps_metric = col1.empty()
+        stage_metric = col2.empty()
+        good_reps_metric = col3.empty()
 
-        # Larger Camera Feed (centered, ~80% width)
-        col_center = st.columns([1,5,1])[1]
-        FRAME_WINDOW = col_center.image([], channels="BGR", use_container_width=True)
+        FRAME_WINDOW = st.image([])
 
         mp_drawing, mp_pose = mp.solutions.drawing_utils, mp.solutions.pose
         cap = cv2.VideoCapture(0)
+
+        if not cap.isOpened():
+            st.error("❌ Webcam not available. Please check your camera connection and browser permissions.")
+            st.stop()
 
         with mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5) as pose:
             while cap.isOpened() and st.session_state.workout_started:
                 ret, frame = cap.read()
                 if not ret:
-                    st.error("❌ Could not access webcam.")
+                    st.error("❌ Could not read frame from webcam. Please restart the workout.")
                     break
 
                 image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -103,30 +109,47 @@ def run():
 
                 try:
                     landmarks = results.pose_landmarks.landmark
-                    shoulder = [landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].x,
-                                landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].y]
-                    elbow = [landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].x,
-                             landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].y]
-                    wrist = [landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].x,
-                             landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].y]
+                    shoulder = [landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].x, landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].y]
+                    elbow = [landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].x, landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].y]
+                    wrist = [landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].x, landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].y]
 
                     elbow_angle = calculate_angle(shoulder, elbow, wrist)
+                    
+                    st.session_state.feedback_list = check_bicep_curl_form(landmarks, elbow_angle, st.session_state.stage)
 
                     if elbow_angle > 160:
                         st.session_state.stage = "down"
                     if elbow_angle < 30 and st.session_state.stage == 'down':
                         st.session_state.stage = "up"
                         st.session_state.counter += 1
-                        if not st.session_state.feedback_list:
+                        # --- Corrected Good Reps Logic ---
+                        # Check the form at the exact moment the rep is counted
+                        if not check_bicep_curl_form(landmarks, elbow_angle, "up"):
                             st.session_state.good_reps += 1
-
-                    st.session_state.feedback_list = check_bicep_curl_form(landmarks, elbow_angle, st.session_state.stage)
+                
                 except:
                     pass
+                
+                # --- On-Screen Feedback Logic Added Back ---
+                y_pos = 100
+                if st.session_state.feedback_list:
+                    for feedback in st.session_state.feedback_list:
+                        cv2.putText(image, feedback, (15, y_pos), 
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2, cv2.LINE_AA)
+                        y_pos += 30
+                else:
+                    cv2.putText(image, "GOOD FORM", (15, y_pos), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
 
                 if results.pose_landmarks:
                     mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
 
+                # --- Update UI ---
+                reps_metric.metric("Reps", st.session_state.counter)
+                stage_metric.metric("Stage", st.session_state.stage if st.session_state.stage else "-")
+                good_reps_metric.metric("Good Reps", st.session_state.good_reps)
+                
+                # --- Fixed Deprecation Warning ---
                 FRAME_WINDOW.image(image, channels='BGR', use_container_width=True)
 
         cap.release()
